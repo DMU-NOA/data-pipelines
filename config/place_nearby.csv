@@ -1,0 +1,6 @@
+target_type,radius_m,max_count,note
+admin_dong,0,1,관광지가 속한 행정동 (생활인구 연결)
+citydata_area,1000,3,관광지가 속하거나 1km 안에 있는 121장소 영역 (영역 안이면 거리 0)
+sdot_sensor,1000,5,반경 1km 안의 S-DoT 센서 가까운 순 5개
+subway_station,1000,5,반경 1km 안의 지하철역 가까운 순 5개 (호선별로 따로)
+bus_stop,500,10,반경 500m 안의 버스정류장 가까운 순 10개

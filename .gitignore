@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual Environment
+.venv/
+
+# Environment variables
+.env
+
+# Raw data
+data/raw/
+
+# Test
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+# Logs
+data/logs/
+
+# Build
+*.egg-info/
+
+# 로컬 진행 현황 메모 (저장소에 올리지 않음)
+STATUS.md

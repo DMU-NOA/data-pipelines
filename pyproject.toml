@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "noa-data-pipeline"
+version = "0.1.0"
+description = "NOA tourism data collection pipeline"
+requires-python = ">=3.13"
+
+dependencies = [
+    "pandas>=2.2",
+    "openpyxl>=3.1",
+    "requests>=2.32",
+    "python-dotenv>=1.0",
+    "psycopg[binary]>=3.2",
+    "pyshp>=2.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

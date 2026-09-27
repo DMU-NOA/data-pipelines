@@ -1,0 +1,6 @@
+code,name,environment,sort_order
+history,역사·명소,outdoor,1
+culture,전시·문화,indoor,2
+nature,자연·공원,outdoor,3
+shopping,쇼핑·놀거리,mixed,4
+food,맛집,indoor,5

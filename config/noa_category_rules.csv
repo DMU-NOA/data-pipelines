@@ -1,0 +1,20 @@
+lcls_prefix,noa_category,note
+HS,history,역사관광 전체: 고궁 성곽 한옥마을 종교성지 비석 등
+VE01,history,랜드마크: 타워/전망대 다리 분수 건물 동상
+VE06,culture,공연시설: 공연장 영화관
+VE07,culture,전시시설: 박물관 기념관 전시관 미술관 과학관 컨벤션
+VE09,culture,교육시설: 문화원 도서관 문화전수시설
+VE10,culture,레저스포츠시설
+VE12,culture,기타문화관광지: 서점 기타 문화시설
+EX,culture,체험관광: 전통 공예 웰니스 산업관광
+NA,nature,자연관광 전체: 산 계곡 강 수목원 생태공원
+VE03,nature,도시공원
+VE040300,nature,둘레길
+SH01,shopping,백화점
+SH02,shopping,쇼핑몰 아웃렛
+SH06,shopping,시장
+VE02,shopping,테마공원: 테마파크 워터파크 동물원 수족관
+VE04,shopping,골목길/문화거리 마을관광지 (둘레길 제외)
+VE05,shopping,복합관광시설: 관광특구
+EX07,shopping,기타체험: 유람선 명동/홍대/강남 같은 지역
+FD,food,음식점 카페
