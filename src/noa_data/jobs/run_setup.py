@@ -5,6 +5,8 @@ import sys
 STEPS = [
     ("DB migration", ["-m", "noa_data.db.migrate"]),
     ("전체 데이터 수집/적재", ["-m", "noa_data.jobs.run_daily"]),
+    # fresh setup에서는 CityData 현재 스냅샷이 최소 1회 필요하다.
+    ("실시간 CityData 초기 수집/적재", ["-m", "noa_data.jobs.run_realtime"]),
     ("ML 학습/예측", ["-m", "noa_data.jobs.run_training"]),
 ]
 
