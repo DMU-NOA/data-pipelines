@@ -189,3 +189,59 @@ data-pipeline/
 ├── data/logs/         실행 로그 (git 제외)
 └── tests/
 ```
+
+
+## NOA 통합 실행
+
+`test` 브랜치에서는 기존 `noa-backend`의 데이터/ML 스크립트를 data-pipelines 쪽으로 통합한다.
+
+### 새 DB 최초 구축
+
+```powershell
+python -m noa_data.jobs.run_setup
+```
+
+실행 순서:
+
+1. DB migration
+2. 전체 데이터 수집
+3. DB 적재
+4. `seoul_spots`, `tour_spots`, `spot_mapping` 서비스 테이블 동기화
+5. ML 학습 데이터 생성
+6. RandomForest 학습
+7. `latest_congestion` actual/predicted 갱신
+
+### 매일 데이터 최신화
+
+```powershell
+python -m noa_data.jobs.run_daily
+```
+
+기존 모델이 있으면 마지막에 predicted 혼잡도까지 갱신한다. 모델이 없으면 actual만 갱신한다.
+
+### ML 재학습
+
+```powershell
+python -m noa_data.jobs.run_training
+```
+
+현재 V1 feature는 `category`, `mapx`, `mapy`, `hour`, `day_of_week`이며,
+학습 라벨은 `citydata_population`의 서울시 실제 혼잡도다.
+향후 S-DoT, 지하철/버스, 생활인구, 외국인, 날씨, 공휴일, KTO 집중률을 V2 feature로 추가한다.
+
+### 실시간 혼잡도 갱신
+
+```powershell
+python -m noa_data.jobs.run_realtime
+```
+
+CityData 수집 → DB 적재 → 서비스 테이블 동기화 → actual/predicted 갱신을 한 번에 수행한다.
+`scripts/register_tasks.ps1`을 실행하면 이 작업이 15분마다 등록된다.
+
+### Backend와의 역할 분리
+
+- `data-pipelines`: 외부 데이터 수집, 원본 보존, DB 적재, ML 학습/예측, 서비스 read model 갱신
+- `noa-backend`: FastAPI 서비스 API, 사용자/찜 기능
+- `noa-frontend`: 기존 API를 그대로 사용
+
+현재 backend 호환 테이블은 `seoul_spots`, `tour_spots`, `spot_mapping`, `latest_congestion`이다.
