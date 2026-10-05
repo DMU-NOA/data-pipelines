@@ -7,8 +7,8 @@
 #
 # 로그인되어 있고 PC가 켜져 있을 때만 실행된다.
 #
-# - realtime : 15분마다 실시간 도시데이터 수집 (파일로만 저장)
-# - daily    : 매일 새벽 나머지 수집 (이후 DB 적재, 예측도 여기에 추가)
+# - realtime : 15분마다 CityData 수집 → DB 적재 → actual/predicted 혼잡도 갱신
+# - daily    : 매일 새벽 전체 데이터 수집 → DB 적재 → 서비스 테이블/혼잡도 갱신
 
 $runner = Join-Path $PSScriptRoot "run_hidden.vbs"
 
@@ -25,7 +25,7 @@ foreach ($name in $oldTasks) {
 }
 
 $tasks = @(
-    @{ Name = "realtime"; Args = "collect_seoul_citydata"; Schedule = @("/SC", "MINUTE", "/MO", "15") },
+    @{ Name = "realtime"; Args = "run_realtime";          Schedule = @("/SC", "MINUTE", "/MO", "15") },
     @{ Name = "daily";    Args = "run_daily";              Schedule = @("/SC", "DAILY", "/ST", "01:10") }
 )
 
