@@ -12,6 +12,7 @@ from noa_data.loaders import (
     kto_bigdata,
     nearby,
     sdot,
+    service,
     spatial,
     tour,
     transit,
@@ -39,10 +40,10 @@ LOADERS = {
     "tour_festival": tour.load_festivals,
     "tour_place_detail": tour.load_details,
 
-    # 3. 관광지 ↔ 주변 신호 관계 (위의 위치 정보가 모두 있어야 한다)
+    # 3. 관광지 ↔ 주변 신호 관계
     "place_nearby": nearby.build,
 
-    # 4. 한국관광공사 내비게이션 빅데이터 (중심 관광지 순위, 연관 관광지) 와 관광지 연결표
+    # 4. 한국관광공사 빅데이터
     "kto_hub": kto_bigdata.load_hub,
     "kto_related": kto_bigdata.load_related,
     "kto_place_match": kto_bigdata.build_match,
@@ -57,13 +58,15 @@ LOADERS = {
     "living_population": living_population.load_monthly_files,
     "foreigner_dong": foreigner.load_dong_files,
     "kto_visitor": kto_bigdata.load_visitor,
-    # 집계구 단위 외국인은 원본만 받는다. 집계구 경계(SGIS) 확보 후 적재를 추가한다.
+
+    # 6. 현재 noa-backend가 읽는 서비스용 read model
+    "service": service.sync_all,
 }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="data/raw 의 원본 파일을 DB에 적재 (이미 적재한 파일은 건너뜀)",
+        description="data/raw 원본 파일을 DB에 적재하고 서비스 테이블까지 동기화",
     )
     parser.add_argument(
         "--only",
