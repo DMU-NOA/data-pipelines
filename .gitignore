@@ -32,3 +32,4 @@ STATUS.md
 
 # Generated ML artifacts
 artifacts/
+.env.example
