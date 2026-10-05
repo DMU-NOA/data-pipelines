@@ -29,3 +29,6 @@ data/logs/
 
 # 로컬 진행 현황 메모 (저장소에 올리지 않음)
 STATUS.md
+
+# Generated ML artifacts
+artifacts/
