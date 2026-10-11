@@ -4,7 +4,7 @@ Run via: python -m noa_data.jobs.run_setup --audit-only
 Writes artifacts/data_audit.json (gitignored). No API calls or DB mutations.
 """
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from noa_data.collectors.common import PROJECT_ROOT
 from noa_data.db.connection import connect
@@ -172,7 +172,7 @@ def _training_readiness(conn, table_names):
         result["reasons"].append(f"관측지역 부족 ({areas}/20)")
     if times < limits["minimum_times"]:
         result["reasons"].append(f"관측시각 부족 ({times}/24)")
-    if first is None or last is None or last-first < __import__("datetime").timedelta(days=7):
+    if first is None or last is None or last-first < timedelta(days=7):
         result["reasons"].append("최소 7일 실측 이력 부족")
     for name, count in result["class_counts"].items():
         if count < limits["minimum_per_class"]:
@@ -203,6 +203,51 @@ def audit(conn):
         elif row["status"] != "present":
             report["warnings"].append(f"{table}: {row['status']}")
     available = {r["table"] for r in report["tables"] if r["status"] == "present"}
+
+    # Staleness is evaluated from the *source observation time*, never the
+    # pipeline load time. For other feeds (monthly releases, holidays, etc.)
+    # publication lag is expected, so only report the timestamp.
+    expected_recent = {
+        "citydata_population": timedelta(hours=3),
+        "citydata_weather": timedelta(hours=3),
+        "citydata_road_traffic": timedelta(minutes=90),
+        "citydata_parking": timedelta(minutes=90),
+    }
+    now = datetime.now(timezone.utc)
+    for row in report["tables"]:
+        threshold = expected_recent.get(row["table"])
+        if not threshold or not row.get("latest"):
+            continue
+        try:
+            observed = datetime.fromisoformat(row["latest"])
+            if observed.tzinfo is None:
+                # Date without timezone is not proof of a fresh live reading.
+                row["fresh"] = None
+            else:
+                row["fresh"] = -timedelta(minutes=5) <= now - observed <= threshold
+                if row["fresh"] is False:
+                    report["warnings"].append(f"{row['table']}: 관측 시각 오래됨")
+        except ValueError:
+            row["fresh"] = None
+
+    # Source-level ingestion history complements current table counts.
+    if "pipeline_load_history" in {
+        x[0] for x in conn.execute(
+            """SELECT tablename FROM pg_tables WHERE schemaname = 'public'"""
+        ).fetchall()
+    }:
+        try:
+            report["load_history"] = [
+                {"source": source, "files": files,
+                 "loaded_rows_recorded": recorded, "last_loaded": _serial(latest)}
+                for source, files, recorded, latest in conn.execute(
+                    """SELECT source, COUNT(*), COALESCE(SUM(row_count), 0),
+                              MAX(loaded_at)
+                       FROM pipeline_load_history GROUP BY source ORDER BY source"""
+                ).fetchall()
+            ]
+        except Exception as exc:
+            report["warnings"].append(f"적재 이력 집계 실패: {type(exc).__name__}")
     try:
         report["predictions"] = _prediction_summary(conn, "latest_congestion" in available)
     except Exception as exc:
@@ -240,7 +285,16 @@ def main():
     for problem in ml.get("reasons", []):
         print(" -", problem)
     print(f"필수 테이블 미준비: {report['missing_required'] or '없음'}")
+    freshness = [
+        f"{r['table']}: {'최신' if r['fresh'] else '오래됨'}"
+        for r in report["tables"] if r.get("fresh") is not None
+    ]
+    print("실시간 계열 관측 최신성:", ", ".join(freshness) or "확인 불가")
     print(f"선택/원본 테이블 확인 필요: {len(report['warnings'])}건")
+    for message in report["warnings"][:15]:
+        print(" -", message)
+    if len(report["warnings"]) > 15:
+        print(f" - 그 외 {len(report['warnings'])-15}건 (JSON 참조)")
 
     path = PROJECT_ROOT / "artifacts" / "data_audit.json"
     path.parent.mkdir(parents=True, exist_ok=True)
