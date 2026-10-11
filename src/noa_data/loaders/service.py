@@ -138,9 +138,12 @@ def sync_tour_spots(conn: psycopg.Connection) -> int:
 
 def sync_mapping(conn: psycopg.Connection) -> int:
     """
-    config/citydata_tour_mapping.csv를 spot_mapping에 반영한다.
+    CSV에서 누락된 매핑만 추가한다.
 
-    CSV를 단일 원본으로 사용한다. DB에 직접 넣은 임시 매핑은 다음 동기화 때 제거된다.
+    운영 DB에는 spot_mapping(area_cd)의 UNIQUE 제약이 없을 수도 있다.
+    따라서 ON CONFLICT (area_cd)에 의존하거나 전체 DELETE 하지 않는다.
+    기존 매핑이 CSV와 다르면 API 참조/좋아요가 영향을 받을 수 있으므로
+    조용히 변경하지 않고 경고로 남긴다.
     """
     if not MAPPING_FILE.exists():
         raise FileNotFoundError(f"매핑 설정 파일이 없습니다: {MAPPING_FILE}")
@@ -149,40 +152,68 @@ def sync_mapping(conn: psycopg.Connection) -> int:
         rows = list(csv.DictReader(file))
 
     valid = []
-
     for row in rows:
         area_cd = (row.get("area_cd") or "").strip()
         content_id = (row.get("content_id") or "").strip()
-
         if area_cd and content_id:
             valid.append((area_cd, content_id))
 
-    with conn.transaction():
-        # 매 15분마다 전부 DELETE/INSERT하면 PK가 바뀌고 참조 무결성에
-        # 위험하므로, 기존 매핑을 보존하며 필요한 부분만 추가한다.
-        count = 0
+    # 같은 키의 상충 설정이 있으면 부분 동기화하지 않고 중단한다.
+    areas = {}
+    contents = {}
+    for area_cd, content_id in valid:
+        if area_cd in areas and areas[area_cd] != content_id:
+            raise ValueError(f"CSV 중복 area_cd 매핑 충돌: {area_cd}")
+        if content_id in contents and contents[content_id] != area_cd:
+            raise ValueError(f"CSV 중복 content_id 매핑 충돌: {content_id}")
+        areas[area_cd] = content_id
+        contents[content_id] = area_cd
 
-        for area_cd, content_id in valid:
+    inserted = 0
+    unchanged = 0
+    skipped = 0
+    with conn.transaction():
+        for area_cd, content_id in dict.fromkeys(valid):
+            # 실제 backend 스키마에 UNIQUE(area_cd)가 없어도 중복을 만들지 않는다.
+            existing = conn.execute(
+                """
+                SELECT area_cd, content_id
+                FROM spot_mapping
+                WHERE area_cd = %s OR content_id = %s
+                """,
+                (area_cd, content_id),
+            ).fetchall()
+            if existing:
+                if len(existing) == 1 and existing[0] == (area_cd, content_id):
+                    unchanged += 1
+                else:
+                    skipped += 1
+                    print(f"  spot_mapping 충돌 유지: {area_cd} → {content_id} (기존 매핑 보존)")
+                continue
+
             result = conn.execute(
                 """
                 INSERT INTO spot_mapping (area_cd, content_id)
                 SELECT %s, %s
-                WHERE EXISTS (
-                    SELECT 1 FROM seoul_spots WHERE area_cd = %s
-                )
-                AND EXISTS (
-                    SELECT 1 FROM tour_spots WHERE content_id = %s
-                )
-                ON CONFLICT (area_cd) DO UPDATE
-                SET content_id = EXCLUDED.content_id
-                WHERE spot_mapping.content_id IS DISTINCT FROM EXCLUDED.content_id
+                WHERE EXISTS (SELECT 1 FROM seoul_spots WHERE area_cd = %s)
+                  AND EXISTS (SELECT 1 FROM tour_spots WHERE content_id = %s)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM spot_mapping
+                      WHERE area_cd = %s OR content_id = %s
+                  )
+                ON CONFLICT DO NOTHING
                 """,
-                (area_cd, content_id, area_cd, content_id),
+                (area_cd, content_id, area_cd, content_id, area_cd, content_id),
             )
-            count += result.rowcount
+            inserted += result.rowcount
+            if result.rowcount == 0:
+                skipped += 1
 
-    print(f"  spot_mapping: {count:,} / config {len(valid):,}")
-    return count
+    print(
+        f"  spot_mapping: 신규 {inserted:,}, 기존 {unchanged:,}, "
+        f"건너뜀 {skipped:,} / config {len(valid):,}"
+    )
+    return inserted
 
 
 def sync_all(conn: psycopg.Connection) -> int:
