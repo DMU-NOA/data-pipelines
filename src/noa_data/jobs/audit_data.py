@@ -46,6 +46,7 @@ TABLES = (
     ("한국관광공사 방문자", "kto_region_visitor", "base_date"),
     ("한국관광공사 장소 연결", "kto_place_match", None),
     ("혼잡도 서비스", "latest_congestion", "updated_at"),
+    ("검증된 지역 시간별 예측", "area_hourly_forecast", "issued_at"),
 )
 # Without these, the fundamental tourism service or its observed congestion
 # cannot work; other feeds may be optional, limited or lagging by publication.
@@ -279,7 +280,8 @@ def main():
     ml = report.get("ml_training", {})
     print("\n===== 현재 ML V1 학습 준비도 =====")
     print("특징: category, mapx, mapy, hour, day_of_week")
-    print("S-DoT·지하철·버스·생활인구·외국인·날씨 통합 V2 학습: 아직 미구현")
+    print("V2 다중 소스 학습 코드 구현됨: 현재 소스 커버리지 및 품질 기준 충족 시에만 발표")
+    print("주의: V2 혼잡도 정답은 서울시 지역 단위입니다. 관광지 자체 실측이 아닙니다.")
     print("기초 자료 조건 충족:", "예 (추가 검증 필요)" if ml.get("ready_for_training_gate")
           else "아니요")
     for problem in ml.get("reasons", []):

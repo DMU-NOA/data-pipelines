@@ -2,6 +2,7 @@ from noa_data.collectors import seoul_citydata
 from noa_data.db.connection import connect
 from noa_data.loaders import citydata, citydata_transport, service
 from noa_data.ml.predict import refresh_congestion
+from noa_data.ml.hourly_predict import publish as publish_hourly
 
 
 def main() -> None:
@@ -29,7 +30,10 @@ def main() -> None:
         print("\n===== 혼잡도 최신화 =====")
         actual, predicted = refresh_congestion(conn)
 
-    print(f"actual={actual:,}, predicted={predicted:,}")
+        print("\\n===== 검증된 지역별 시간대 혼잡도 예측 =====")
+        hourly = publish_hourly(conn)
+
+    print(f"actual={actual:,}, predicted={predicted:,}, hourly_verified={hourly:,}")
 
 
 if __name__ == "__main__":
