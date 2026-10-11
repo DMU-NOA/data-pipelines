@@ -92,19 +92,34 @@ def sync_actual(conn: psycopg.Connection) -> int:
     return result.rowcount
 
 
+
+def clear_unvalidated_predictions(conn: psycopg.Connection) -> None:
+    """검증된 모델이 없으면 과거 V1 예측을 최신 혼잡도에서 제거한다."""
+    with conn.transaction():
+        result = conn.execute(
+            "DELETE FROM latest_congestion WHERE source = 'predicted'"
+        )
+    if result.rowcount:
+        print(f"오래된 미검증 predicted 제거: {result.rowcount:,}건")
+
+
+
 def sync_predicted(conn: psycopg.Connection) -> int:
     """
     CityData와 직접 매핑되지 않은 TourAPI 관광지의 현재 혼잡도를 ML로 예측한다.
     """
     if not MODEL_PATH.exists():
+        clear_unvalidated_predictions(conn)
         print(f"예측 모델 없음 - predicted 생략: {MODEL_PATH}")
         return 0
 
     artifact = joblib.load(MODEL_PATH)
     if not isinstance(artifact, dict) or artifact.get("validated") is not True:
+        clear_unvalidated_predictions(conn)
         print("검증되지 않은 기존 V1 모델은 사용하지 않습니다. 데이터 축적 후 run_training을 실행하세요.")
         return 0
     if artifact.get("feature_columns") != ["category", "mapx", "mapy", "hour", "day_of_week"]:
+        clear_unvalidated_predictions(conn)
         print("모델 feature 버전 불일치 - predicted 생략")
         return 0
     model = artifact["model"]
