@@ -96,5 +96,10 @@ def build_dataset(conn: psycopg.Connection) -> pd.DataFrame:
 
     print(f"학습 데이터셋: {len(df):,}행 → {DATASET_PATH}")
     print(df["congestion_label"].value_counts().sort_index())
+    print(
+        f"관측 장소 {df['area_cd'].nunique()}곳, "
+        f"서로 다른 수집 시점 {df['collected_at'].nunique()}개"
+    )
+    print("참고: 원본 CityData 121곳과 매핑 117곳은 학습 가능한 라벨 행 수와 같지 않습니다.")
 
     return df

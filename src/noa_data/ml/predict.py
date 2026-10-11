@@ -99,7 +99,14 @@ def sync_predicted(conn: psycopg.Connection) -> int:
         print(f"예측 모델 없음 - predicted 생략: {MODEL_PATH}")
         return 0
 
-    model = joblib.load(MODEL_PATH)
+    artifact = joblib.load(MODEL_PATH)
+    if not isinstance(artifact, dict) or artifact.get("validated") is not True:
+        print("검증되지 않은 기존 V1 모델은 사용하지 않습니다. 데이터 축적 후 run_training을 실행하세요.")
+        return 0
+    if artifact.get("feature_columns") != ["category", "mapx", "mapy", "hour", "day_of_week"]:
+        print("모델 feature 버전 불일치 - predicted 생략")
+        return 0
+    model = artifact["model"]
 
     rows = conn.execute(
         """
