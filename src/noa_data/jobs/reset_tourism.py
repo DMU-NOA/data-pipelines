@@ -47,13 +47,13 @@ def reset(conn, *, allow_delete_likes=False):
             result = conn.execute(f"DELETE FROM {table}")
             counts[table] = result.rowcount
 
+        # LIKE 와일드카드 '%'를 SQL 문자열에 직접 넣으면 psycopg가
+        # 바인딩 플레이스홀더로 오해할 수 있으므로 패턴을 파라미터로 전달한다.
         result = conn.execute(
             """DELETE FROM pipeline_load_history
                WHERE source = ANY(%s)
-                  OR file_path LIKE 'tourapi_places/%'
-                  OR file_path LIKE 'tourapi_details/%'
-                  OR file_path LIKE 'tourapi_festivals/%'""",
-            (list(TOUR_SOURCES),),
+                  OR file_path LIKE ANY(%s)""",
+            (list(TOUR_SOURCES), [f"{source}/%" for source in TOUR_SOURCES]),
         )
         counts["tour_pipeline_load_history"] = result.rowcount
 
