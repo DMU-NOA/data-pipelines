@@ -42,6 +42,7 @@ OPTIONAL = {
 # Known-upcoming features only; no future weather/road observations.
 PROVENANCE = {
     "citydata_population": "area-level label + last observed class; never target-hour class",
+    "citydata_forecast": "official forecasts are kept separate from supervised target labels",
     "citydata_weather": "as-of observed AND collected timestamps; max age 3h",
     "citydata_road_traffic": "as-of observed AND collected timestamps; max age 90m",
     "citydata_parking": "as-of observed AND collected timestamps; max age 90m",
@@ -52,11 +53,13 @@ PROVENANCE = {
     "foreigner_population_dong": "monthly hourly proxy; conservative 3-month publication lag",
     "weather_observation": "24h-old ASOS reference, never target-time weather",
     "tour_festival": "known at issue time + geographically close and target-date active",
-    "holiday": "calendar holiday of future target date",
+    "holiday": "target-day holiday only when collected before issue time",
     "kto_concentration": "not included without robust tourist/area linkage and publish-time auditing",
     "kto_region_visitor": "not included without reliable publication date",
     "kto_hub_place": "static metadata only; not a time-varying population signal",
     "kto_related_place": "tourist relationship metadata; not a validated area hourly signal",
+    "admin_dong": "static location link in place_nearby, not a time-series label",
+    "tour_place": "static tourism locations; CityData area labels are not site-specific",
 }
 
 
@@ -247,10 +250,19 @@ def _known_future(df, conn):
     df["month"] = target.dt.month.astype(int)
     df["is_weekend"] = (df["day_of_week"] >= 5).astype(int)
     days = target.dt.date.tolist()
+    # Temporary holidays announced later must not leak to earlier training.
     holiday_rows = conn.execute(
-        "SELECT DISTINCT holiday_date FROM holiday WHERE is_holiday IS TRUE").fetchall()
-    known_holidays = {row[0] for row in holiday_rows}
-    df["is_holiday"] = [int(day in known_holidays) for day in days]
+        """SELECT holiday_date, MIN(collected_at)
+           FROM holiday WHERE is_holiday IS TRUE
+           GROUP BY holiday_date""").fetchall()
+    known_holidays = {
+        day: pd.Timestamp(first_known).tz_convert("UTC")
+        for day, first_known in holiday_rows
+    }
+    df["is_holiday"] = [
+        int(day in known_holidays and known_holidays[day] <= issue)
+        for day, issue in zip(days, df["issue_time"])
+    ]
 
     festival_rows = conn.execute("""
         SELECT a.area_cd, f.event_start_date, f.event_end_date, f.collected_at

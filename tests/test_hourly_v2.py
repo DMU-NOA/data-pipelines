@@ -93,3 +93,40 @@ def test_feature_source_contracts_explicitly_exclude_unverifiable_kto():
     assert "sdot_people" in hf.INPUT_COLUMNS
     assert "subway_board" in hf.INPUT_COLUMNS
     assert "is_holiday" in hf.INPUT_COLUMNS
+
+
+def test_monthly_publication_lag_respects_original_rows(monkeypatch):
+    base = pd.DataFrame({
+        "area_cd": ["POI002", "POI001", "POI001"],
+        "issue_time": pd.to_datetime([
+            "2026-09-15T10:00:00+09:00", "2026-10-15T10:00:00+09:00",
+            "2026-09-15T10:00:00+09:00"
+        ], utc=True),
+        "hour": [10, 10, 10],
+    })
+    raw = pd.DataFrame([
+        ("POI001", datetime(2026,7,1).date(), 10, 200., 100.),
+        ("POI002", datetime(2026,7,1).date(), 10, 300., 150.),
+    ], columns=["area_cd","use_month","hour","first","second"])
+    monkeypatch.setattr(hf, "_fetch", lambda *a, **kw: raw)
+    result = hf._monthly_proxies(base, object(), NOW)
+    assert pd.isna(result.iloc[0]["subway_board"])
+    assert result.iloc[1]["subway_board"] == 200
+    assert pd.isna(result.iloc[2]["subway_board"])
+
+
+def test_future_announced_holiday_must_not_leak():
+    class Conn:
+        def __init__(self): self.calls=0
+        def execute(self, query):
+            self.calls += 1
+            class R:
+                def __init__(self, value): self.value=value
+                def fetchall(self): return self.value
+            return R([(datetime(2026,10,12).date(), NOW+timedelta(hours=3))] if self.calls==1 else [])
+    frame = pd.DataFrame({
+        "area_cd": ["POI001"],
+        "forecast_at": pd.to_datetime(["2026-10-12T12:00:00+09:00"], utc=True),
+        "issue_time": pd.to_datetime(["2026-10-11T16:00:00+09:00"], utc=True),
+    })
+    assert hf._known_future(frame, Conn()).iloc[0]["is_holiday"] == 0

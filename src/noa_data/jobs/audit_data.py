@@ -250,6 +250,22 @@ def audit(conn):
         except Exception as exc:
             report["warnings"].append(f"적재 이력 집계 실패: {type(exc).__name__}")
     try:
+        from noa_data.ml.hourly_train import load_verified
+        verified = load_verified()
+        report["hourly_v2"] = (
+            {"model_validated": True,
+             "balanced_accuracy": verified["balanced_accuracy"],
+             "baseline_accuracy": verified["baseline_balanced_accuracy"],
+             "per_horizon_scores": verified.get("horizon_balanced_accuracy", {}),
+             "feature_coverage": verified.get("feature_coverage", {}),
+             "trained_at_utc": verified.get("trained_at_utc"),
+             "prediction_unit": verified.get("prediction_unit")}
+            if verified else {"model_validated": False}
+        )
+    except Exception as exc:
+        report["hourly_v2"] = {"model_validated": False, "error": type(exc).__name__}
+        report["warnings"].append("V2 모델 로드 실패")
+    try:
         report["predictions"] = _prediction_summary(conn, "latest_congestion" in available)
     except Exception as exc:
         report["predictions"] = {"error": type(exc).__name__}
@@ -277,6 +293,12 @@ def main():
     print("\n===== 혼잡도 출처 구분 =====")
     print(f"실측 {pred.get('actual', '-')} / 검증 예측 {pred.get('verified', '-')} "
           f"/ 미검증 시범 예측 {pred.get('experimental', '-')}")
+    h2 = report.get("hourly_v2", {})
+    print(f"지역별 시간별 V2 모델 검증 여부: {h2.get('model_validated', False)}")
+    if h2.get("model_validated"):
+        print(f"V2 balanced accuracy: {h2['balanced_accuracy']:.3f}, "
+              f"persistence 기준선: {h2['baseline_accuracy']:.3f}")
+        print(f"V2 학습 특성 제공률: {h2['feature_coverage']}")
     ml = report.get("ml_training", {})
     print("\n===== 현재 ML V1 학습 준비도 =====")
     print("특징: category, mapx, mapy, hour, day_of_week")
