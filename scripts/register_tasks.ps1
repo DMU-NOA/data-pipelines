@@ -9,6 +9,7 @@
 #
 # - realtime : 15분마다 CityData 수집 → DB 적재 → actual/predicted 혼잡도 갱신
 # - daily    : 매일 새벽 전체 데이터 수집 → DB 적재 → 서비스 테이블/혼잡도 갱신
+# - training : 매주 일요일 새벽 검증 통과 시에만 ML 재학습
 
 $runner = Join-Path $PSScriptRoot "run_hidden.vbs"
 
@@ -26,7 +27,8 @@ foreach ($name in $oldTasks) {
 
 $tasks = @(
     @{ Name = "realtime"; Args = "run_realtime";          Schedule = @("/SC", "MINUTE", "/MO", "15") },
-    @{ Name = "daily";    Args = "run_daily";              Schedule = @("/SC", "DAILY", "/ST", "01:10") }
+    @{ Name = "daily";    Args = "run_daily";              Schedule = @("/SC", "DAILY", "/ST", "01:10") },
+    @{ Name = "training"; Args = "run_training";          Schedule = @("/SC", "WEEKLY", "/D", "SUN", "/ST", "03:00") }
 )
 
 foreach ($task in $tasks) {

@@ -245,3 +245,20 @@ CityData 수집 → DB 적재 → 서비스 테이블 동기화 → actual/predi
 - `noa-frontend`: 기존 API를 그대로 사용
 
 현재 backend 호환 테이블은 `seoul_spots`, `tour_spots`, `spot_mapping`, `latest_congestion`이다.
+
+
+### 한 번 설정하는 자동 운영 (Windows)
+
+최초에 아래 명령 한 번으로 마이그레이션, 전체 수집/적재, 실제 혼잡도 수집,
+ML 학습(데이터 부족시 안전한 보류), **작업 스케줄러 등록**을 진행한다.
+
+```powershell
+python -m noa_data.jobs.run_setup --schedule
+```
+
+- 15분마다 `run_realtime`: 수집 → DB 적재 → 서비스 동기화 → 실제 혼잡도 갱신 → 검증된 모델이 있으면 예측
+- 매일 01:10 `run_daily`: 전체 데이터 수집·적재·서비스 동기화
+- 매주 일요일 03:00 `run_training`: 충분한 4개 클래스·이력·검증 점수가 확보된 경우에만 학습
+
+Windows 작업 스케줄러의 등록 성공 로그를 확인해야 하며, 작업은 PC가 켜져 있고 Windows 실행 조건이 충족될 때만 수행된다.
+기존 실행은 `run_setup` 명령 그대로 유지된다. 실제 CityData 이력이 부족할 때 ML만 보류되며 수집 작업은 중단되지 않는다.

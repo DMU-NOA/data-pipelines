@@ -158,8 +158,8 @@ def sync_mapping(conn: psycopg.Connection) -> int:
             valid.append((area_cd, content_id))
 
     with conn.transaction():
-        conn.execute("DELETE FROM spot_mapping")
-
+        # 매 15분마다 전부 DELETE/INSERT하면 PK가 바뀌고 참조 무결성에
+        # 위험하므로, 기존 매핑을 보존하며 필요한 부분만 추가한다.
         count = 0
 
         for area_cd, content_id in valid:
@@ -173,7 +173,9 @@ def sync_mapping(conn: psycopg.Connection) -> int:
                 AND EXISTS (
                     SELECT 1 FROM tour_spots WHERE content_id = %s
                 )
-                ON CONFLICT DO NOTHING
+                ON CONFLICT (area_cd) DO UPDATE
+                SET content_id = EXCLUDED.content_id
+                WHERE spot_mapping.content_id IS DISTINCT FROM EXCLUDED.content_id
                 """,
                 (area_cd, content_id, area_cd, content_id),
             )

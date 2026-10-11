@@ -66,6 +66,31 @@ def build_dataset(conn: psycopg.Connection) -> pd.DataFrame:
         ORDER BY c.ppltn_time, c.area_cd
     """
 
+    # 서비스 실제 혼잡도(117곳)와 ML 학습가능 장소(68곳)의 차이를 원인별로 계측한다.
+    # 임의 좌표나 카테고리를 채워서 학습행을 부풀리지 않는다.
+    diagnostics = conn.execute("""
+        SELECT
+            COUNT(*) AS actual_rows,
+            COUNT(*) FILTER (WHERE m.content_id IS NULL) AS no_mapping,
+            COUNT(*) FILTER (WHERE t.content_id IS NULL) AS no_tour_spot,
+            COUNT(*) FILTER (WHERE t.category IS NULL) AS no_category,
+            COUNT(*) FILTER (WHERE t.mapx IS NULL OR t.mapy IS NULL) AS no_coordinates,
+            COUNT(*) FILTER (
+                WHERE t.content_id IS NOT NULL
+                  AND t.category IS NOT NULL
+                  AND t.mapx IS NOT NULL AND t.mapy IS NOT NULL
+            ) AS eligible
+        FROM citydata_population c
+        LEFT JOIN spot_mapping m ON m.area_cd = c.area_cd
+        LEFT JOIN tour_spots t ON t.content_id = m.content_id
+        WHERE c.congest_lvl IN ('여유', '보통', '약간 붐빔', '붐빔')
+    """).fetchone()
+    print(
+        "ML 데이터 누락 진단: "
+        f"실제라벨={diagnostics[0]}, 매핑없음={diagnostics[1]}, "
+        f"관광지없음={diagnostics[2]}, 카테고리없음={diagnostics[3]}, "
+        f"좌표없음={diagnostics[4]}, 학습가능={diagnostics[5]}"
+    )
     rows = conn.execute(query).fetchall()
 
     columns = [
