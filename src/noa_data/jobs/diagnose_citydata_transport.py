@@ -127,6 +127,59 @@ def _db_stats():
                 """
             ).fetchone()
             print(f"  현재 조건으로 반경 2km 주차장 조회 가능한 매핑 관광지: {row[0]:,}곳")
+        # Coverage expected under the new backend read-only queries.
+        if road_ok:
+            coverage = """
+                WITH eligible AS (
+                    SELECT m.content_id
+                    FROM spot_mapping m
+                    JOIN citydata_road_traffic r ON r.area_cd = m.area_cd
+                    WHERE r.observed_at BETWEEN now() - interval '90 minutes'
+                                            AND now() + interval '5 minutes'
+                    UNION
+                    SELECT n.content_id
+                    FROM place_nearby n
+                    JOIN citydata_road_traffic r ON r.area_cd = n.target_id
+                    WHERE n.target_type = 'citydata_area'
+                      AND n.distance_m <= 1000
+                      AND r.observed_at BETWEEN now() - interval '90 minutes'
+                                            AND now() + interval '5 minutes'
+                )
+                SELECT t.content_id, t.name FROM eligible e
+                JOIN tour_spots t ON t.content_id = e.content_id
+            """
+            row = conn.execute(f"SELECT COUNT(*) FROM ({coverage}) possible").fetchone()
+            sample = conn.execute(
+                f"SELECT content_id, name FROM ({coverage}) possible "
+                "ORDER BY name, content_id LIMIT 5"
+            ).fetchall()
+            print(f"  개선한 조회 기준(직접 매핑 또는 1km 이내 관측 지역) 도로 정보 가능: {row[0]:,}곳")
+            print(f"  도로 테스트용 관광지: {sample}")
+        if parking_ok:
+            parking_condition = """
+                t.mapx IS NOT NULL AND t.mapy IS NOT NULL
+                AND EXISTS (
+                    SELECT 1 FROM citydata_parking p
+                    WHERE p.observed_at BETWEEN now() - interval '90 minutes'
+                                            AND now() + interval '5 minutes'
+                      AND ST_DWithin(
+                          p.location,
+                          ST_SetSRID(
+                              ST_MakePoint(t.mapx::double precision, t.mapy::double precision),
+                              4326
+                          )::geography, 2000
+                      )
+                )
+            """
+            available = conn.execute(
+                f"SELECT COUNT(*) FROM tour_spots t WHERE {parking_condition}"
+            ).fetchone()[0]
+            sample = conn.execute(
+                f"SELECT t.content_id, t.name FROM tour_spots t "
+                f"WHERE {parking_condition} ORDER BY t.name, t.content_id LIMIT 5"
+            ).fetchall()
+            print(f"  개선한 조회 기준(지역 구분 없이 직선 2km) 주차장 잔여 정보 가능: {available:,}곳")
+            print(f"  주차장 테스트용 관광지: {sample}")
         history_exists = conn.execute(
             "SELECT to_regclass('public.pipeline_load_history')"
         ).fetchone()[0]
