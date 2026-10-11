@@ -262,3 +262,35 @@ python -m noa_data.jobs.run_setup --schedule
 
 Windows 작업 스케줄러의 등록 성공 로그를 확인해야 하며, 작업은 PC가 켜져 있고 Windows 실행 조건이 충족될 때만 수행된다.
 기존 실행은 `run_setup` 명령 그대로 유지된다. 실제 CityData 이력이 부족할 때 ML만 보류되며 수집 작업은 중단되지 않는다.
+
+
+## 전체 수집·적재·예측을 한 명령으로 검증
+
+원본의 수집/API → 정제·DB 적재 → CityData 실시간 수집 → ML 학습(품질 기준 충족 시)
+→ DB 데이터 현황 보고서까지 **한 번** 실행한다. 스케줄러는 기본으로 등록하지 않는다.
+
+```powershell
+cd C:\data-pipelines
+git switch test
+git pull --ff-only origin test
+python -m noa_data.jobs.run_setup
+```
+
+**기존 DB 현황만 확인**하려면 (외부 API 요청·데이터 변경 없음):
+
+```powershell
+python -m noa_data.jobs.run_setup --audit-only
+```
+
+실행 결과는 콘솔과 로컬 `artifacts/data_audit.json`에 저장된다. 보고서에는
+관광지·축제·S-DoT·기상청·생활인구·외국인·지하철·버스·CityData·도로·주차·
+KTO 자료·서비스 매핑·혼잡도 예측의 테이블별 수량과 최근 자료 시각을 기록한다.
+대량 테이블 수량은 DB 통계치일 수 있어 `약`으로 표시한다.
+외부 소스별 API/활용신청 실패가 있으면 실행은 실패로 보고하고 다른 수집
+단계는 가능한 범위에서 계속 실행한다. 서비스 기본 테이블이 비어도 실패 처리한다.
+
+**주의:** 모든 데이터를 저장하는 것은 ML 모델이 모든 데이터를 사용한다는 뜻이 아니다.
+현재 검증 RF V1 특성은 `category/mapx/mapy/hour/day_of_week` 5개뿐이며,
+다중 센서·날씨·교통을 결합한 V2 모델은 별도 개발 및 시간순 검증이 필요하다.
+이력이 짧거나 라벨이 편향되면 RF 학습은 보류되고 시범 KNN 추정이 생성될 수 있다.
+보고서에는 실측·검증된 예측·미검증 시범 예측을 별도로 표시한다.
