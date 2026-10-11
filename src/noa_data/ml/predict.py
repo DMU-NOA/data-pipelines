@@ -6,6 +6,7 @@ import pandas as pd
 import psycopg
 
 from noa_data.collectors.common import PROJECT_ROOT
+from noa_data.ml.category import normalize_category
 
 
 KST = ZoneInfo("Asia/Seoul")
@@ -121,7 +122,6 @@ def sync_predicted(conn: psycopg.Connection) -> int:
           ON m.content_id = t.content_id
         WHERE
             m.content_id IS NULL
-            AND t.category IS NOT NULL
             AND t.mapx IS NOT NULL
             AND t.mapy IS NOT NULL
         ORDER BY t.content_id
@@ -137,7 +137,7 @@ def sync_predicted(conn: psycopg.Connection) -> int:
     features = pd.DataFrame(
         [
             {
-                "category": category,
+                "category": normalize_category(category),
                 "mapx": float(mapx),
                 "mapy": float(mapy),
                 "hour": now.hour,

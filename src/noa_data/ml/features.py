@@ -4,6 +4,7 @@ import pandas as pd
 import psycopg
 
 from noa_data.collectors.common import PROJECT_ROOT
+from noa_data.ml.category import normalize_category
 
 
 ARTIFACT_DIR = PROJECT_ROOT / "artifacts"
@@ -60,7 +61,6 @@ def build_dataset(conn: psycopg.Connection) -> pd.DataFrame:
           ON t.content_id = m.content_id
         WHERE
             c.congest_lvl IN ('여유', '보통', '약간 붐빔', '붐빔')
-            AND t.category IS NOT NULL
             AND t.mapx IS NOT NULL
             AND t.mapy IS NOT NULL
         ORDER BY c.ppltn_time, c.area_cd
@@ -77,7 +77,6 @@ def build_dataset(conn: psycopg.Connection) -> pd.DataFrame:
             COUNT(*) FILTER (WHERE t.mapx IS NULL OR t.mapy IS NULL) AS no_coordinates,
             COUNT(*) FILTER (
                 WHERE t.content_id IS NOT NULL
-                  AND t.category IS NOT NULL
                   AND t.mapx IS NOT NULL AND t.mapy IS NOT NULL
             ) AS eligible
         FROM citydata_population c
@@ -89,7 +88,7 @@ def build_dataset(conn: psycopg.Connection) -> pd.DataFrame:
         "ML 데이터 누락 진단: "
         f"실제라벨={diagnostics[0]}, 매핑없음={diagnostics[1]}, "
         f"관광지없음={diagnostics[2]}, 카테고리없음={diagnostics[3]}, "
-        f"좌표없음={diagnostics[4]}, 학습가능={diagnostics[5]}"
+        f"좌표없음={diagnostics[4]}, 카테고리보정후_학습가능={diagnostics[5]}"
     )
     rows = conn.execute(query).fetchall()
 
@@ -114,6 +113,7 @@ def build_dataset(conn: psycopg.Connection) -> pd.DataFrame:
             "먼저 CityData 수집/적재와 service sync를 실행하세요."
         )
 
+    df["category"] = df["category"].map(normalize_category)
     df["congestion_label"] = df["congestion_level"].map(LABELS)
 
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
@@ -125,6 +125,6 @@ def build_dataset(conn: psycopg.Connection) -> pd.DataFrame:
         f"관측 장소 {df['area_cd'].nunique()}곳, "
         f"서로 다른 수집 시점 {df['collected_at'].nunique()}개"
     )
-    print("참고: 원본 CityData 121곳과 매핑 117곳은 학습 가능한 라벨 행 수와 같지 않습니다.")
+    print("참고: 매핑/좌표가 없는 장소는 제외하되 카테고리 없는 장소는 기타로 포함합니다.")
 
     return df
