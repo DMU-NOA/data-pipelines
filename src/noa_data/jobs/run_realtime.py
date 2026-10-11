@@ -1,6 +1,6 @@
 from noa_data.collectors import seoul_citydata
 from noa_data.db.connection import connect
-from noa_data.loaders import citydata, service
+from noa_data.loaders import citydata, citydata_transport, service
 from noa_data.ml.predict import refresh_congestion
 
 
@@ -21,6 +21,7 @@ def main() -> None:
 
     with connect() as conn:
         citydata.load_snapshots(conn)
+        citydata_transport.load_snapshots(conn)
 
         print("\n===== 서비스 테이블 동기화 =====")
         service.sync_all(conn)

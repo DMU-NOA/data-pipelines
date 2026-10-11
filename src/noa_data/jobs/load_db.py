@@ -6,6 +6,7 @@ from noa_data.loaders import (
     calendar,
     category,
     citydata,
+    citydata_transport,
     foreigner,
     kto,
     living_population,
@@ -51,6 +52,7 @@ LOADERS = {
     # 5. 시계열 신호
     "kto_concentration": kto.load_concentration,
     "citydata": citydata.load_snapshots,
+    "citydata_transport": citydata_transport.load_snapshots,
     "sdot_api": sdot.load_api_observations,
     "sdot_file": sdot.load_file_observations,
     "subway_ridership": transit.load_subway_ridership,
