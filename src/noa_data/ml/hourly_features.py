@@ -313,8 +313,27 @@ def expand_forecast(base, conn, horizons=HORIZONS, with_labels=True):
         return base
     # The source labels are un-sampled hourly observations. Predictions
     # must always target future hours relative to the issue timestamp.
-    hourly_labels = base[["area_cd", "slot", "last_level"]].rename(
-        columns={"slot": "forecast_at", "last_level": "congestion_label"})
+    # Training origin rows may be sampled (every 2h). Target labels must
+    # NOT be sampled, or odd horizons vanish and 12h evaluation is biased.
+    if with_labels:
+        labels_raw = _fetch(
+            conn,
+            """SELECT DISTINCT ON (area_cd, date_trunc('hour', ppltn_time))
+                      area_cd, date_trunc('hour', ppltn_time), congest_lvl
+               FROM citydata_population
+               WHERE ppltn_time >= %s AND ppltn_time <= %s
+                 AND congest_lvl IN ('여유','보통','약간 붐빔','붐빔')
+               ORDER BY area_cd, date_trunc('hour', ppltn_time),
+                        ppltn_time DESC""",
+            (base["issue_time"].min().to_pydatetime(),
+             (base["issue_time"].max() + pd.Timedelta(hours=max(horizons))).to_pydatetime()),
+            ["area_cd", "forecast_at", "label"],
+        )
+        labels_raw["forecast_at"] = _utc(labels_raw["forecast_at"])
+        labels_raw["congestion_label"] = labels_raw["label"].map(LABELS)
+        hourly_labels = labels_raw[["area_cd", "forecast_at", "congestion_label"]]
+    else:
+        hourly_labels = None
     frames = []
     for h in horizons:
         part = base.copy()
@@ -350,5 +369,7 @@ def expand_forecast(base, conn, horizons=HORIZONS, with_labels=True):
     if with_labels:
         df = df.merge(hourly_labels, on=["area_cd", "forecast_at"], how="inner",
                       validate="many_to_one")
+        # A target hour at or before issuance would be label leakage.
+        df = df[df["forecast_at"] > df["issue_time"]]
         df = df[df["congestion_label"].notna()]
     return df
