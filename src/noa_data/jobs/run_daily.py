@@ -15,7 +15,9 @@ STEPS: list[tuple[str, list[str]]] = [
     ("관광지 분류 코드", ["collect_tourapi_codes"]),
     # 운영시간, 휴무일. 하루 한도 안에서 이어서 받고, 다 받으면 아무것도 하지 않는다.
     ("관광지 상세정보", ["collect_tourapi_details"]),
-    ("축제·행사", ["collect_tourapi_festivals"]),
+    # 공연·축제는 서울 시간 기준 최근 365일 시작 행사 + 미래 행사를 매일 다시 조회.
+    # 30일 내 예정/진행 행사만 상세화면에 노출되며 종료·오래된 데이터는 API에서 제외.
+    ("축제·행사", ["collect_tourapi_festivals", "--lang", "ko"]),
     # 위치 기준 (새 버전/파일이 있을 때만 받는다)
     ("행정동 경계", ["collect_admdong_boundary"]),
     ("121장소 목록·영역", ["collect_seoul_files", "citydata_area"]),
