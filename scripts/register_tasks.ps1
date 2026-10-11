@@ -31,15 +31,34 @@ $tasks = @(
     @{ Name = "training"; Args = "run_training";          Schedule = @("/SC", "WEEKLY", "/D", "SUN", "/ST", "03:00") }
 )
 
+$failedTasks = @()
+
 foreach ($task in $tasks) {
     $action = "wscript.exe `"$runner`" $($task.Args)"
     $arguments = @("/Create", "/F", "/TN", "\NOA\$($task.Name)", "/TR", $action) + $task.Schedule
     schtasks @arguments | Out-Null
 
     if ($LASTEXITCODE -eq 0) {
-        Write-Output "등록: \NOA\$($task.Name)  ($($task.Schedule -join ' '))"
+        # Successful /Create is necessary but not sufficient: verify the task exists.
+        schtasks /Query /TN "\NOA\$($task.Name)" 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Output "등록 및 확인: \NOA\$($task.Name)  ($($task.Schedule -join ' '))"
+        }
+        else {
+            Write-Output "등록 확인 실패: \NOA\$($task.Name)"
+            $failedTasks += $task.Name
+        }
     }
     else {
-        Write-Output "실패: \NOA\$($task.Name)"
+        Write-Output "등록 실패: \NOA\$($task.Name)"
+        $failedTasks += $task.Name
     }
 }
+
+if ($failedTasks.Count -gt 0) {
+    Write-Output "스케줄러 일부 등록 실패: $($failedTasks -join ', ')"
+    exit 1
+}
+
+Write-Output "스케줄러 3개 등록·목록 확인 완료 (실제 주기 실행은 개별 로그 확인 필요)"
+exit 0
