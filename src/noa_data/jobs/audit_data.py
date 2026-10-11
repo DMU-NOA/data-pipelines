@@ -285,8 +285,11 @@ def main():
     print("\n===== NOA 전체 DB 데이터 현황 =====", flush=True)
     for item in report["tables"]:
         rows = item["rows"]
-        count = (("약 " if item["count_is_estimate"] else "") + f"{rows:,}")
-                 if rows is not None else "-"
+        count = (
+            (("약 " if item["count_is_estimate"] else "") + f"{rows:,}")
+            if rows is not None
+            else "-"
+        )
         latest = f" | 최신 기준 {item['latest']}" if item.get("latest") is not None else ""
         print(f"[{item['status']:7}] {item['name']:<21} {count:>12}건{latest}")
     pred = report.get("predictions", {})
