@@ -21,7 +21,10 @@ def main() -> None:
         # 초기 수집 직후 표본과 클래스가 부족한 것은 예상 가능한 상태.
         # 실제 데이터가 충분히 쌓일 때까지 임의 예측은 생성하지 않는다.
         print(exc)
-        print("ML 학습 보류: CityData를 계속 수집한 후 재학습하세요.")
+        print("검증 모델 보류: KNN 시범 추정으로 관광지 예측을 제공합니다.")
+        with connect() as conn:
+            predicted = sync_predicted(conn)
+        print(f"actual={actual:,}, experimental_predicted={predicted:,}")
         return
 
     print("\n===== 검증된 모델로 혼잡도 예측 =====")

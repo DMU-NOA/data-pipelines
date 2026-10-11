@@ -93,131 +93,171 @@ def sync_actual(conn: psycopg.Connection) -> int:
 
 
 
-def clear_unvalidated_predictions(conn: psycopg.Connection) -> None:
-    """검증된 모델이 없으면 과거 V1 예측을 최신 혼잡도에서 제거한다."""
-    with conn.transaction():
-        result = conn.execute(
-            "DELETE FROM latest_congestion WHERE source = 'predicted'"
-        )
-    if result.rowcount:
-        print(f"오래된 미검증 predicted 제거: {result.rowcount:,}건")
+def _geo_features(rows):
+    """서울 위경도를 근사 미터 좌표로 바꾼다 (KNN 거리용)."""
+    import numpy as np
+
+    return np.asarray(
+        [[float(lon) * 88400.0, float(lat) * 111000.0] for lon, lat in rows],
+        dtype=float,
+    )
 
 
-
-def sync_predicted(conn: psycopg.Connection) -> int:
+def _spatial_knn_estimates(reference, targets):
     """
-    CityData와 직접 매핑되지 않은 TourAPI 관광지의 현재 혼잡도를 ML로 예측한다.
+    관측 장소를 공간상 최근접 이웃으로 학습하는 KNN 시범 모델.
+    신뢰도 검증된 시간/장소 일반화 모델이 아니므로 별도 플래그로 저장한다.
+    데이터 불균형 때문에 존재하지 않은 혼잡 클래스를 만들어내지 않는다.
     """
-    if not MODEL_PATH.exists():
-        clear_unvalidated_predictions(conn)
-        print(f"예측 모델 없음 - predicted 생략: {MODEL_PATH}")
-        return 0
+    from sklearn.neighbors import KNeighborsClassifier
 
-    artifact = joblib.load(MODEL_PATH)
-    if not isinstance(artifact, dict) or artifact.get("validated") is not True:
-        clear_unvalidated_predictions(conn)
-        print("검증되지 않은 기존 V1 모델은 사용하지 않습니다. 데이터 축적 후 run_training을 실행하세요.")
-        return 0
-    if artifact.get("feature_columns") != ["category", "mapx", "mapy", "hour", "day_of_week"]:
-        clear_unvalidated_predictions(conn)
-        print("모델 feature 버전 불일치 - predicted 생략")
-        return 0
-    model = artifact["model"]
+    if len(reference) < 2 or len({int(r[2]) for r in reference}) < 2:
+        raise ValueError("시범 KNN 학습에 서로 다른 혼잡도 2단계 이상의 실제 관측이 필요합니다.")
 
-    rows = conn.execute(
+    x_ref = _geo_features([(r[0], r[1]) for r in reference])
+    y_ref = [int(r[2]) for r in reference]
+    x_target = _geo_features(targets)
+    n = min(3, len(reference))
+    model = KNeighborsClassifier(n_neighbors=n, weights="distance")
+    model.fit(x_ref, y_ref)
+    labels = model.predict(x_target)
+    distances, _ = model.kneighbors(x_target, n_neighbors=1)
+    return [int(v) for v in labels], [round(float(row[0]), 1) for row in distances]
+
+
+def _prediction_targets(conn: psycopg.Connection):
+    return conn.execute(
         """
-        SELECT
-            t.content_id,
-            t.name,
-            t.category,
-            t.mapx,
-            t.mapy
+        SELECT t.content_id, t.category, t.mapx, t.mapy
         FROM tour_spots t
-        LEFT JOIN spot_mapping m
-          ON m.content_id = t.content_id
-        WHERE
-            m.content_id IS NULL
-            AND t.mapx IS NOT NULL
-            AND t.mapy IS NOT NULL
+        LEFT JOIN spot_mapping m ON m.content_id = t.content_id
+        WHERE m.content_id IS NULL
+          AND t.mapx IS NOT NULL
+          AND t.mapy IS NOT NULL
         ORDER BY t.content_id
         """
     ).fetchall()
 
-    if not rows:
-        print("predicted 대상 관광지가 없습니다.")
-        return 0
 
-    now = datetime.now(KST)
-
-    features = pd.DataFrame(
-        [
-            {
-                "category": normalize_category(category),
-                "mapx": float(mapx),
-                "mapy": float(mapy),
-                "hour": now.hour,
-                "day_of_week": now.weekday(),
-            }
-            for _, _, category, mapx, mapy in rows
-        ]
-    )
-
-    predictions = model.predict(features)
-
+def _publish_predictions(conn, rows, labels, *, verified, method, distances=None):
+    """시범/검증 모델 모두 같은 서비스 테이블에 예측 출처를 기록한다."""
     with conn.transaction():
-        # actual로 전환된 관광지에는 predicted 행을 남기지 않는다.
+        # 매핑된 실제 관측 장소 및 사라진 관광지의 오래된 예측 정리.
         conn.execute(
             """
-            DELETE FROM latest_congestion l
-            WHERE l.source = 'predicted'
-              AND EXISTS (
-                  SELECT 1
-                  FROM spot_mapping m
-                  WHERE m.content_id = l.content_id
-              )
+            DELETE FROM latest_congestion p
+            WHERE p.source = 'predicted'
+              AND (NOT EXISTS (
+                  SELECT 1 FROM tour_spots t WHERE t.content_id = p.content_id
+              ) OR EXISTS (
+                  SELECT 1 FROM spot_mapping m WHERE m.content_id = p.content_id
+              ))
             """
         )
-
         count = 0
-
-        for (content_id, _name, _category, _mapx, _mapy), prediction in zip(
-            rows,
-            predictions,
-        ):
-            label = int(prediction)
-            level = LABEL_NAMES[label]
-
+        for i, (content_id, _category, _mapx, _mapy) in enumerate(rows):
+            label = int(labels[i])
+            if label not in LABEL_NAMES:
+                raise ValueError(f"허용하지 않는 혼잡도 예측 클래스: {label}")
+            distance = distances[i] if distances is not None else None
             result = conn.execute(
                 """
                 INSERT INTO latest_congestion (
-                    area_cd,
-                    content_id,
-                    congestion_level,
-                    congestion_label,
-                    source,
-                    updated_at
+                    area_cd, content_id, congestion_level, congestion_label,
+                    source, updated_at, prediction_verified, prediction_method,
+                    reference_distance_m
                 )
-                VALUES (
-                    NULL,
-                    %s,
-                    %s,
-                    %s,
-                    'predicted',
-                    CURRENT_TIMESTAMP
-                )
-                ON CONFLICT (content_id)
-                WHERE source = 'predicted'
+                VALUES (NULL, %s, %s, %s, 'predicted', CURRENT_TIMESTAMP, %s, %s, %s)
+                ON CONFLICT (content_id) WHERE source = 'predicted'
                 DO UPDATE SET
                     congestion_level = EXCLUDED.congestion_level,
                     congestion_label = EXCLUDED.congestion_label,
-                    updated_at = EXCLUDED.updated_at
+                    updated_at = EXCLUDED.updated_at,
+                    prediction_verified = EXCLUDED.prediction_verified,
+                    prediction_method = EXCLUDED.prediction_method,
+                    reference_distance_m = EXCLUDED.reference_distance_m
                 """,
-                (content_id, level, label),
+                (content_id, LABEL_NAMES[label], label, verified, method, distance),
             )
             count += result.rowcount
-
-    print(f"predicted 혼잡도 동기화: {count:,}")
     return count
+
+
+def _experimental_predictions(conn):
+    rows = _prediction_targets(conn)
+    if not rows:
+        print("시범 ML 예측 대상 관광지가 없습니다.")
+        return 0
+
+    reference = conn.execute(
+        """
+        SELECT t.mapx, t.mapy, a.congestion_label
+        FROM latest_congestion a
+        JOIN tour_spots t ON t.content_id = a.content_id
+        WHERE a.source = 'actual'
+          AND t.mapx IS NOT NULL AND t.mapy IS NOT NULL
+          AND a.congestion_label BETWEEN 0 AND 3
+        ORDER BY a.area_cd
+        """
+    ).fetchall()
+    try:
+        labels, distances = _spatial_knn_estimates(
+            reference, [(r[2], r[3]) for r in rows],
+        )
+    except ValueError as exc:
+        print(f"시범 KNN 보류: {exc}")
+        return 0
+
+    count = _publish_predictions(
+        conn, rows, labels, verified=False,
+        method="spatial_knn_experimental", distances=distances,
+    )
+    print(
+        f"시범 공간 KNN 예측: {count:,}건 "
+        f"(실측 {len(reference)}곳 참조, 미검증 참고 추정)"
+    )
+    return count
+
+
+def sync_predicted(conn: psycopg.Connection) -> int:
+    """검증된 RF가 있으면 사용하고, 없으면 실측 기반 KNN 시범 추정을 제공한다."""
+    if MODEL_PATH.exists():
+        artifact = joblib.load(MODEL_PATH)
+    else:
+        artifact = None
+
+    if (
+        isinstance(artifact, dict)
+        and artifact.get("validated") is True
+        and artifact.get("feature_columns")
+        == ["category", "mapx", "mapy", "hour", "day_of_week"]
+    ):
+        model = artifact["model"]
+        rows = _prediction_targets(conn)
+        if not rows:
+            return 0
+        now = datetime.now(KST)
+        features = pd.DataFrame(
+            [
+                {
+                    "category": normalize_category(category),
+                    "mapx": float(mapx),
+                    "mapy": float(mapy),
+                    "hour": now.hour,
+                    "day_of_week": now.weekday(),
+                }
+                for _cid, category, mapx, mapy in rows
+            ]
+        )
+        labels = model.predict(features)
+        count = _publish_predictions(
+            conn, rows, labels, verified=True, method="validated_random_forest",
+        )
+        print(f"검증된 RandomForest 예측: {count:,}건")
+        return count
+
+    print("검증된 RF 모델 부족 → 실제 관측에 기반한 미검증 KNN 시범 예측 실행")
+    return _experimental_predictions(conn)
 
 
 def refresh_congestion(conn: psycopg.Connection) -> tuple[int, int]:
