@@ -30,7 +30,7 @@ def main() -> None:
         print("\n===== 혼잡도 최신화 =====")
         actual, predicted = refresh_congestion(conn)
 
-        print("\\n===== 검증된 지역별 시간대 혼잡도 예측 =====")
+        print("\n===== 검증된 지역별 시간대 혼잡도 예측 =====")
         hourly = publish_hourly(conn)
 
     print(f"actual={actual:,}, predicted={predicted:,}, hourly_verified={hourly:,}")

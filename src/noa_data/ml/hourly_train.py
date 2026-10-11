@@ -88,11 +88,22 @@ def train(frame):
     predicted = model.predict(_matrix(validation))
     score = balanced_accuracy_score(truth, predicted)
     baseline = balanced_accuracy_score(truth, validation["last_level"].astype(int))
-    if score < MIN_BALANCED or score < baseline + MIN_IMPROVEMENT:
+    # An acceptable pooled score can hide a severely poor 12-hour horizon.
+    # Track every horizon separately so it is visible in the model artifact.
+    horizon_scores = {}
+    for horizon in range(1, 13):
+        mask = validation["horizon"].to_numpy() == horizon
+        if int(mask.sum()) < 20:
+            raise ValueError(f"V2 {horizon}시간 검증 자료 부족 ({int(mask.sum())}개)")
+        horizon_scores[horizon] = round(
+            float(balanced_accuracy_score(truth[mask], predicted[mask])), 4
+        )
+    if score < MIN_BALANCED or score < baseline + MIN_IMPROVEMENT or horizon_scores[12] < 0.30:
         raise ValueError(
             f"V2 검증 미달: balanced_accuracy={score:.3f}, "
             f"현재 혼잡도 유지 기준선={baseline:.3f}; "
-            f"필요: {MIN_BALANCED:.2f} 이상 및 기준선 + {MIN_IMPROVEMENT:.3f}"
+            f"필요: {MIN_BALANCED:.2f} 이상 및 기준선 + {MIN_IMPROVEMENT:.3f}; "
+            f"12시간 score={horizon_scores[12]:.3f} (최소 0.30)"
         )
 
     coverage = {}
@@ -106,12 +117,14 @@ def train(frame):
         "baseline_balanced_accuracy": float(baseline),
         "training_rows": len(training), "validation_rows": len(validation),
         "feature_coverage": coverage, "sources": PROVENANCE,
+        "horizon_balanced_accuracy": horizon_scores,
         "trained_at_utc": datetime.now(timezone.utc).isoformat(),
     }
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(artifact, MODEL_PATH)
     print(f"V2 검증 통과: model={VERSION} score={score:.3f} baseline={baseline:.3f}")
     print(f"훈련 {len(training):,}행 / 검증 {len(validation):,}행 / 출처 커버리지 {coverage}")
+    print(f"시차별 balanced accuracy: {horizon_scores}")
     return artifact
 
 

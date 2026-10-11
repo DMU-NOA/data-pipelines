@@ -1,4 +1,5 @@
 """Refresh observed congestion, retrain V1 and V2 only when each gate passes."""
+from datetime import timedelta
 from noa_data.db.connection import connect
 from noa_data.ml.features import build_dataset
 from noa_data.ml.predict import sync_actual, sync_predicted
@@ -30,6 +31,22 @@ def main():
     print("\n===== V2: 시점별 다중 데이터 결합 =====")
     try:
         with connect() as conn:
+            # Avoid expensive 12-horizon expansion until enough *real*
+            # observation history exists. A one-day data reset must not
+            # trigger a model fit or a huge unnecessary source join.
+            dates = conn.execute(
+                """SELECT MIN(ppltn_time), MAX(ppltn_time),
+                          COUNT(DISTINCT date_trunc('hour', ppltn_time))
+                   FROM citydata_population
+                   WHERE ppltn_time >= now() - interval '30 days'
+                     AND congest_lvl IN ('여유','보통','약간 붐빔','붐빔')"""
+            ).fetchone()
+            if (dates[0] is None or dates[1]-dates[0] < timedelta(days=14)
+                    or dates[2] < 7 * 24):
+                raise ValueError(
+                    f"현재 CityData 이력 부족: 관측 시작={dates[0]}, 마지막={dates[1]}, "
+                    f"서로 다른 관측 시간={dates[2]}. V2는 최소 14일 필요."
+                )
             features = make_features(conn)
             hourly_df = expand_forecast(features, conn, with_labels=True)
         print(f"V2 후보: {len(hourly_df):,}행")
