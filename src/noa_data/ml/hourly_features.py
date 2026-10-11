@@ -93,9 +93,12 @@ def _base(conn, now, days):
     df["observation"] = _utc(df["observation"])
     df["collected"] = _utc(df["collected"])
     df["slot"] = df["observation"].dt.floor("h")
-    df["issue_time"] = df["slot"] + pd.Timedelta(hours=1)
+    # A 15:50 observation is not usable at 15:00. Use its actual
+    # collector timestamp as the prediction issue time, rounded UP to
+    # the next hour. Future labels are strictly later than this time.
+    df["issue_time"] = df["collected"].dt.ceil("h")
     # Some feeds claim a past observation but become available later.
-    df = df[(df["collected"] <= df["issue_time"]) & df["longitude"].notna()
+    df = df[(df["observation"] <= df["issue_time"]) & df["longitude"].notna()
             & df["latitude"].notna()].copy()
     df = df.sort_values(["area_cd", "slot", "observation"])
     df = df.drop_duplicates(["area_cd", "slot"], keep="last")
@@ -308,13 +311,15 @@ def expand_forecast(base, conn, horizons=HORIZONS, with_labels=True):
     """Pooled direct horizon model; all labels strictly after issue-hour evidence."""
     if base.empty:
         return base
+    # The source labels are un-sampled hourly observations. Predictions
+    # must always target future hours relative to the issue timestamp.
     hourly_labels = base[["area_cd", "slot", "last_level"]].rename(
         columns={"slot": "forecast_at", "last_level": "congestion_label"})
     frames = []
     for h in horizons:
         part = base.copy()
         part["horizon"] = h
-        part["forecast_at"] = part["slot"] + pd.Timedelta(hours=h)
+        part["forecast_at"] = part["issue_time"] + pd.Timedelta(hours=h)
         frames.append(part)
     df = pd.concat(frames, ignore_index=True)
     df = _known_future(df, conn)
