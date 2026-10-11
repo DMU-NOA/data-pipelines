@@ -29,7 +29,9 @@ LABEL_NAMES = {
 
 def sync_actual(conn: psycopg.Connection) -> int:
     """
-    citydata_population의 장소별 최신 실제 혼잡도를 latest_congestion에 반영한다.
+    최신 CityData 실측을 지역(area_cd) 기준으로 1건씩 저장한다.
+    TourAPI content_id 매핑 여부와 무관하게 실제 관측은 보존해야 한다.
+    매핑 실패 시 content_id는 NULL (FK 허용); 실측 장소는 별도 API로 조회한다.
     """
     with conn.transaction():
         conn.execute(
@@ -37,35 +39,25 @@ def sync_actual(conn: psycopg.Connection) -> int:
             DELETE FROM latest_congestion l
             WHERE l.source = 'actual'
               AND NOT EXISTS (
-                  SELECT 1
-                  FROM spot_mapping m
-                  WHERE m.area_cd = l.area_cd
+                  SELECT 1 FROM seoul_spots s WHERE s.area_cd = l.area_cd
               )
             """
         )
-
         result = conn.execute(
             """
             WITH latest AS (
                 SELECT DISTINCT ON (c.area_cd)
-                    c.area_cd,
-                    c.congest_lvl,
-                    c.ppltn_time
+                    c.area_cd, c.congest_lvl, c.ppltn_time
                 FROM citydata_population c
                 WHERE c.congest_lvl IN ('여유', '보통', '약간 붐빔', '붐빔')
                 ORDER BY c.area_cd, c.ppltn_time DESC
             )
             INSERT INTO latest_congestion (
-                area_cd,
-                content_id,
-                congestion_level,
-                congestion_label,
-                source,
-                updated_at
+                area_cd, content_id, congestion_level,
+                congestion_label, source, updated_at
             )
             SELECT
-                latest.area_cd,
-                m.content_id,
+                latest.area_cd, m.content_id,
                 latest.congest_lvl,
                 CASE latest.congest_lvl
                     WHEN '여유' THEN 0
@@ -73,13 +65,11 @@ def sync_actual(conn: psycopg.Connection) -> int:
                     WHEN '약간 붐빔' THEN 2
                     WHEN '붐빔' THEN 3
                 END,
-                'actual',
-                latest.ppltn_time
+                'actual', latest.ppltn_time
             FROM latest
-            JOIN spot_mapping m
-              ON m.area_cd = latest.area_cd
-            ON CONFLICT (area_cd)
-            WHERE source = 'actual'
+            JOIN seoul_spots s ON s.area_cd = latest.area_cd
+            LEFT JOIN spot_mapping m ON m.area_cd = latest.area_cd
+            ON CONFLICT (area_cd) WHERE source = 'actual'
             DO UPDATE SET
                 content_id = EXCLUDED.content_id,
                 congestion_level = EXCLUDED.congestion_level,
@@ -87,10 +77,18 @@ def sync_actual(conn: psycopg.Connection) -> int:
                 updated_at = EXCLUDED.updated_at
             """
         )
-
-    print(f"actual 혼잡도 동기화: {result.rowcount:,}")
+        coverage = conn.execute(
+            """
+            SELECT COUNT(*) FILTER (WHERE content_id IS NOT NULL),
+                   COUNT(*) FILTER (WHERE content_id IS NULL)
+            FROM latest_congestion WHERE source = 'actual'
+            """
+        ).fetchone()
+    print(
+        f"actual 혼잡도 동기화: {result.rowcount:,} "
+        f"(TourAPI 매핑 {coverage[0]:,}, 미매핑 지역 {coverage[1]:,})"
+    )
     return result.rowcount
-
 
 
 def _geo_features(rows):
@@ -189,17 +187,32 @@ def _experimental_predictions(conn):
         print("시범 ML 예측 대상 관광지가 없습니다.")
         return 0
 
+    # 지역 자체의 경계를 우선 사용한다. 매핑된 TourAPI 장소가 없어도
+    # 실측 관측 지역을 공간 KNN의 학습 기준점으로 사용할 수 있다.
     reference = conn.execute(
         """
-        SELECT t.mapx, t.mapy, a.congestion_label
+        SELECT
+            COALESCE(
+                ST_X(ST_PointOnSurface(c.boundary::geometry)), t.mapx
+            ) AS longitude,
+            COALESCE(
+                ST_Y(ST_PointOnSurface(c.boundary::geometry)), t.mapy
+            ) AS latitude,
+            a.congestion_label
         FROM latest_congestion a
-        JOIN tour_spots t ON t.content_id = a.content_id
+        JOIN citydata_area c ON c.area_cd = a.area_cd
+        LEFT JOIN spot_mapping m ON m.area_cd = a.area_cd
+        LEFT JOIN tour_spots t ON t.content_id = m.content_id
         WHERE a.source = 'actual'
-          AND t.mapx IS NOT NULL AND t.mapy IS NOT NULL
           AND a.congestion_label BETWEEN 0 AND 3
+          AND (
+              c.boundary IS NOT NULL
+              OR (t.mapx IS NOT NULL AND t.mapy IS NOT NULL)
+          )
         ORDER BY a.area_cd
         """
     ).fetchall()
+    print(f"KNN 공간 좌표 확보한 실측 지역: {len(reference):,}곳")
     try:
         labels, distances = _spatial_knn_estimates(
             reference, [(r[2], r[3]) for r in rows],
