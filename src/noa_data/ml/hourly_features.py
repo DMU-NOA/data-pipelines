@@ -226,15 +226,17 @@ def _monthly_proxies(df, conn, now):
         raw["available"] = _utc(raw["available"])
         raw = raw.sort_values(["available", "area_cd", "hour"])
         left = df[["area_cd", "issue_time", "hour"]].copy()
+        left["_original_position"] = np.arange(len(df))
         # Hour-of-day of intended target is known; use target-hour historical profile.
         left = left.sort_values(["issue_time", "area_cd", "hour"])
         joined = pd.merge_asof(
             left, raw[["area_cd","hour","available","first","second"]],
             left_on="issue_time", right_on="available",
             by=["area_cd","hour"], direction="backward")
-        df.loc[joined.index, name] = joined["first"].to_numpy()
+        joined = joined.sort_values("_original_position")
+        df[name] = joined["first"].to_numpy()
         if second:
-            df.loc[joined.index, second] = joined["second"].to_numpy()
+            df[second] = joined["second"].to_numpy()
     return df
 
 
@@ -295,7 +297,28 @@ def expand_forecast(base, conn, horizons=HORIZONS, with_labels=True):
     df = pd.concat(frames, ignore_index=True)
     df = _known_future(df, conn)
     df = _monthly_proxies(df, conn, datetime.now(KST))
+    # ASOS observation is published later than its measurement; when an exact
+    # publication timestamp isn't recorded use yesterday's hourly city mean
+    # rather than target-hour future weather.
+    city_weather = _fetch(conn, """
+        SELECT date_trunc('hour', observed_at), AVG(temperature)::float
+        FROM weather_observation
+        WHERE observed_at >= now() - interval '34 days'
+          AND temperature BETWEEN -50 AND 55
+        GROUP BY date_trunc('hour', observed_at)
+        ORDER BY date_trunc('hour', observed_at)
+    """, (), ["observed", "temperature"])
     df["asos_temp_yesterday"] = np.nan
+    if not city_weather.empty:
+        city_weather["available"] = _utc(city_weather["observed"]) + pd.Timedelta(days=1)
+        l = df[["issue_time"]].copy()
+        l["_position"] = np.arange(len(l))
+        joined = pd.merge_asof(
+            l.sort_values("issue_time"),
+            city_weather[["available","temperature"]].sort_values("available"),
+            left_on="issue_time",right_on="available",direction="backward",
+            tolerance=pd.Timedelta(hours=3))
+        df["asos_temp_yesterday"] = joined.sort_values("_position")["temperature"].to_numpy()
     # Future label is joined only AFTER all feature sources are assembled.
     if with_labels:
         df = df.merge(hourly_labels, on=["area_cd", "forecast_at"], how="inner",
