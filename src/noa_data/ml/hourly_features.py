@@ -217,7 +217,9 @@ def _monthly_proxies(df, conn, now):
             GROUP BY m.area_cd,date_trunc('month',d.base_date),d.hour
         """),
     ]
-    oldest = (now - timedelta(days=400)).date()
+    # Published monthly datasets do not require scanning years of historical
+    # records at every 15-minute realtime inference call.
+    oldest = (now - timedelta(days=220)).date()
     for name, second, sql in queries:
         raw = _fetch(conn, sql, (oldest,),
                      ["area_cd","use_month","hour","first","second"])
@@ -284,12 +286,20 @@ def _known_future(df, conn):
     return df
 
 
-def make_features(conn, now=None, days=MAX_DAYS):
-    """Construct historical origin-hour features once; used for train and inference."""
+def make_features(conn, now=None, days=MAX_DAYS, sample_step=1):
+    """Construct historical origin-hour features once; used for train and inference.
+
+    Training can subsample every second hourly origin to bound RAM on small
+    servers without altering the real-time inference path.
+    """
     now = now or datetime.now(KST)
     base = _base(conn, now, days)
     if base.empty:
         return base
+    if sample_step > 1:
+        base = base[
+            base.groupby("area_cd", sort=False).cumcount() % sample_step == 0
+        ].copy()
     base = _optional_sources(base, conn, now, days)
     return base
 

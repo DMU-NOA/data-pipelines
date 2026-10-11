@@ -47,7 +47,7 @@ def main():
                     f"현재 CityData 이력 부족: 관측 시작={dates[0]}, 마지막={dates[1]}, "
                     f"서로 다른 관측 시간={dates[2]}. V2는 최소 14일 필요."
                 )
-            features = make_features(conn)
+            features = make_features(conn, sample_step=2)
             hourly_df = expand_forecast(features, conn, with_labels=True)
         print(f"V2 후보: {len(hourly_df):,}행")
         artifact = train_hourly(hourly_df)

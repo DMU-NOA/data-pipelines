@@ -109,6 +109,17 @@ def train(frame):
     coverage = {}
     for source, names in OPTIONAL.items():
         coverage[source] = round(float(training[names].notna().any(axis=1).mean()), 4)
+    measured_sources = ("weather", "traffic", "parking", "sdot",
+                        "subway_monthly", "bus_monthly",
+                        "living_monthly", "foreigner_monthly", "asos_yesterday")
+    active = [s for s in measured_sources if coverage.get(s, 0) >= 0.20]
+    # A 'multi-source V2' built from no real environmental/mobility inputs
+    # must not be published under that label.
+    if len(active) < 2 or coverage.get("weather", 0) < 0.20:
+        raise ValueError(
+            "V2 다중 소스 커버리지 부족: "
+            f"실제 제공률 20% 이상 관측 출처={active}, 상세={coverage}"
+        )
     artifact = {
         "model": model, "validated": True,
         "version": VERSION, "feature_columns": INPUT_COLUMNS,
@@ -116,7 +127,8 @@ def train(frame):
         "horizons": HORIZONS, "balanced_accuracy": float(score),
         "baseline_balanced_accuracy": float(baseline),
         "training_rows": len(training), "validation_rows": len(validation),
-        "feature_coverage": coverage, "sources": PROVENANCE,
+        "feature_coverage": coverage, "trained_source_groups": active,
+        "sources": PROVENANCE,
         "horizon_balanced_accuracy": horizon_scores,
         "trained_at_utc": datetime.now(timezone.utc).isoformat(),
     }
