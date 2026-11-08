@@ -13,6 +13,12 @@ def main() -> None:
     이미 적용한 파일은 수정하지 말고 새 번호의 파일을 추가한다.
     """
 
+    if not MIGRATIONS_DIR.is_dir():
+        raise RuntimeError(f"마이그레이션 폴더가 없습니다: {MIGRATIONS_DIR}")
+    migration_files = sorted(MIGRATIONS_DIR.glob("*.sql"))
+    if not migration_files:
+        raise RuntimeError(f"마이그레이션 SQL 파일이 없습니다: {MIGRATIONS_DIR}")
+
     with connect() as conn:
         conn.execute(
             """
@@ -31,12 +37,12 @@ def main() -> None:
 
         pending = [
             path
-            for path in sorted(MIGRATIONS_DIR.glob("*.sql"))
+            for path in migration_files
             if path.stem not in applied
         ]
 
         if not pending:
-            print("적용할 마이그레이션이 없습니다.")
+            print(f"적용할 마이그레이션이 없습니다 ({MIGRATIONS_DIR}, 파일 {len(migration_files)}개 확인).")
             return
 
         for path in pending:

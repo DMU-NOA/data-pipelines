@@ -10,7 +10,10 @@ import requests
 from dotenv import load_dotenv
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+# Installed wheel modules live in site-packages, not at the runtime root.
+PROJECT_ROOT = Path(
+    os.environ.get("NOA_PROJECT_ROOT") or Path(__file__).resolve().parents[3]
+).resolve()
 RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
 
 KST = ZoneInfo("Asia/Seoul")
