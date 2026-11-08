@@ -1,0 +1,20 @@
+# Existing PostgreSQL/PostGIS service (local or RDS) must be reachable from this container.
+# For a clean host, provide database separately: this compose runs ONE pipeline application.
+services:
+  pipeline:
+    build: .
+    image: noa-data-pipeline:dev
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      TZ: Asia/Seoul
+      DB_HOST: ${DB_HOST:?DB_HOST must be reachable from Docker}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-noa}
+      DB_USER: ${DB_USER:-noa}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    volumes:
+      - ./data/raw:/app/data/raw
+      - ./artifacts:/app/artifacts
+    # Secrets are supplied via .env at runtime; never bake them into the image.
