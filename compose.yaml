@@ -1,5 +1,5 @@
-# Existing PostgreSQL/PostGIS service (local or RDS) must be reachable from this container.
-# For a clean host, provide database separately: this compose runs ONE pipeline application.
+# One long-running pipeline application. Existing PostgreSQL/PostGIS is external.
+# Docker volumes survive image and container replacement.
 services:
   pipeline:
     build: .
@@ -15,6 +15,9 @@ services:
       DB_USER: ${DB_USER:-noa}
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
     volumes:
-      - ./data/raw:/app/data/raw
-      - ./artifacts:/app/artifacts
-    # Secrets are supplied via .env at runtime; never bake them into the image.
+      - noa_raw:/app/data/raw
+      - noa_models:/app/artifacts
+    # Secrets are supplied only at runtime.
+volumes:
+  noa_raw:
+  noa_models:
